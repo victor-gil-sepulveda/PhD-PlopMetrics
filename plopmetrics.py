@@ -5,58 +5,10 @@
 ##
 ## Description:
 ## ------------
-##
 ## This file includes some functions to work with plop generated trajectory files. Its main aim is to allow the user
 ## to select and write the different models of the trajectory using a simple but powerful selection languaje.
-##
-## Functions:
-## ----------
-##
-##-------------------------------------------
-## processDir(dir, file_name_commnon_part)
-##-------------------------------------------
-## This function will create a list of metric records (which are dictionaries) from the trajectory files in a given
-## directory 'dir'.
-## You can also specify the common part of the name of the files, or nothing if you want to parse ALL the files inside
-## the folder.
-##
-## Examples:
-##
-## records = processDir("f","traj")
-##
-## This sentence will return an array of records (stored in 'records') for all the metrics in all the files in the 'f'
-## directory where 'traj' is PART OF its name (this means it will also parse traj.01.pdb, traj.02.pdb... but also
-## mytraj.pdb, atrajh.pdb...)
-##
-## records = processDir("f")
-##
-## In this case it will parse ALL the files inside the 'f' folder.
-##
-##
-##-------------------------------------------
-## filterRecords(expression,records)
-##-------------------------------------------
-## Given a boolean expression written in 'expression', it will choose and return a subset of the 'records' list parameter
-## with all the records that fulfill 'expression'
-##
-## Examples:
-##
-## Think that you have this metrics stored inside your .traj files : 'energy', 'totale', 'metrop', 'proc';
-## and you want to know which models in processor 1 have energy below -26759. Just use this function like this:
-##
-## selection = filterRecords("Proc == 1 and Energy<-26759",records)
-##
-## In your boolean expression write any python-compliant sentence and it will do the trick. It's also case-insensitive.
-##
-## Do you want to extract models with energy between two values globally declared? you can!:
-##
-## X = -10000
-## Y = -20000
-## selection = filterRecords("(Energy<X and Energy>Y)",records)
-##
-## And in general you can use any complex expression using boolean operators and parentheses.
-##
-##
+
+
 ##-------------------------------------------
 ## genSingleTraj(name,records,selection)
 ##-------------------------------------------
@@ -74,133 +26,174 @@
 import sys
 import os
 import numpy
+import re
 
 def toNumber(n):
-	d = 0
-	try:
-		d = float(n)
-	except:
-		try:
-			d = int(n)
-		except:
-			return 0
-	return d
+    """
+    Converts a string (n) into a float or integer.
+    """
+    try:
+	    return float(n)
+    except:
+	    try:
+		    return int(n)
+	    except:
+		    return 0
 
 def processDir(directory, file_name_commnon_part=""):
-	dirList = []
-	allList=os.listdir(directory)
-	for n in allList:
-		if file_name_commnon_part in n:
-			dirList.append(n)
+    """
+    This function will create a list of metric records (which are dictionaries) from the trajectory files in a given
+    directory 'dir'.
+    You can also specify the common part of the name of the files, or nothing if you want to parse ALL the files inside
+    the folder.
 
-	records = []
-	for i,fname in enumerate(dirList):
-		print "Processing %s ( %d of %d )" %(fname, i+1, len(dirList))
-		processFile(os.path.join(sys.argv[1],fname), records, i==0)
-	return records
+    Examples:
 
-def processFile(filename, records, first):
-	line_number = 0
-	last_was_remark = False
-	file = open(filename)
-	for l in file:
-		if l[0:7] == "REMARK ":
-			if last_was_remark == False:
-				## Create a new record
-				if first == True:
-					records.append({"file":filename, "seqres":True})
-				else:
-					records.append({"file":filename})
-			parts = l.split()
-			if len(parts) > 2:
-				# Then is a remark of type
-				#REMARK  TOTALE            -8690.283
-				#REMARK  Steps|              626.000
-				#REMARK  L1  Binding Ene|    -81.535
+    records = processDir("f","traj")
 
-				index = "".join(parts[1:-1])
-				if index[-1] == "|":
-					index = index[:-1]
+    This sentence will return an array of records (stored in 'records') for all the metrics in all the files in the 'f'
+    directory where 'traj' is PART OF its name (this means it will also parse traj.01.pdb, traj.02.pdb... but also
+    mytraj.pdb, atrajh.pdb...)
 
-				records[-1][index.lower()] = toNumber(parts[-1])
-			last_was_remark = True
-		else:
-			last_was_remark = False
-			try:
-				records[-1]["body"].append(line_number)
-			except:
-				try:
-					records[-1]["body"].append(line_number)
-				except :
-					records[-1]["body"] = [line_number]
+    records = processDir("f")
 
-		line_number = line_number + 1
-		first = False
-	del records[-1]["body"][1:-1]
-	file.close()
+    In this case it will parse ALL the files inside the 'f' folder.
+    """
+    dirList = []
+    allList=os.listdir(directory)
+    for n in allList:
+        if file_name_commnon_part in n:
+            dirList.append(n)
 
-## Always use spaces
-def filterRecords(expression,records):
-	## Format the string
-	tags = ["not","and","or",">","<",">=","<=","==","+","-","(",")"]
-	expression = expression.lower()
-	for t in tags:
-		expression = expression.replace(t," "+t+" ")
+    records = []
+    for i, fname in enumerate(dirList):
+        print "Processing %s ( %d of %d )" %(fname, i+1, len(dirList))
+        processFile(os.path.join(directory,fname), records)
+    return records
 
-	## Get all keys from records
-	all_keys = set([])
-	for r in records:
-		all_keys = all_keys | set (r.keys())
+def processREMARK(record_line):
+    """
+    Processes a "REMARK key value" line in order to extract the key (using lower case letters).
+    If the key has one or more spaces, it will change it by underscores "_". e.g.
 
-	## Identify metrics in expression
-	words = expression.split()
-	for w in all_keys:
-		if w in words:
-			expression = expression.replace(w,"r[\""+w+"\"]")
+    #REMARK  L1 Binding Ene    -81.535  => li_binding_ene
+    #REMARK  L1  Binding Ene    -81.535 => li_binding_ene too
 
-	## Delete SEQRES records
-	preselection = []
-	for r in records:
-		if  not "seqres" in r.keys():
-			preselection.append(r)
+    Returns the key and value for that remark
+    """
 
-	selection = []
-	for r in preselection:
-		if eval(expression):
-			selection.append(r)
-		print(eval(expression))
+    parts = record_line.split()
+    record_key = "_".join(parts[1:-1])
+    # special case
+    if '|' in record_key[-1]:
+        # Then is a remark of type
+        #REMARK  TOTALE            -8690.283
+        #REMARK  Steps|              626.000
+        #REMARK  L1  Binding Ene|    -81.535
+        record_key = record_key[0:-1]
 
-	return selection
+    return record_key.lower(), toNumber(parts[-1])
 
+def processFile(filename, records):
+    """
+    Reads a file and extracts the information written in the REMARKS.
+    """
+    file_handler = open(filename)
+
+    record = None
+    last_was_remark = False
+    line_number = 0
+    for l in file_handler:
+        if l[0:6] == "REMARK":
+            if not last_was_remark:
+                if record is  not None:
+                    # Store record
+                    del record["body"][1:-1]
+                    records.append(record)
+                # Create a new record
+                record = {"file":filename,"body":[]}
+            key, value = processREMARK(l)
+            record[key] = value			
+            last_was_remark = True
+        else:
+            record["body"].append(line_number)
+            last_was_remark = False
+        line_number += 1
+    file_handler.close()
+
+def process_tag(tag):
+    """
+    Changes spaces by underscores exactly like in the 'processREMARK' function. Then
+    removes the single quotes.
+    """  
+    return ("_".join( tag.split()))
+
+def filterRecords(expression, records):
+    """
+    Given a boolean expression written in 'expression', it will choose and return a subset of the 'records' list parameter
+    with all the records that fulfill 'expression'
+
+    Examples:
+
+    Think that you have this metrics stored inside your .traj files : 'energy', 'totale', 'metrop', 'proc';
+    and you want to know which models in processor 1 have energy below -26759. Just use this function like this:
+
+    selection = filterRecords("Proc == 1 and Energy<-26759",records)
+
+    In your boolean expression write any python-compliant sentence and it will do the trick. It's also case-insensitive.
+
+    Do you want to extract models with energy between two values globally declared? you can!:
+
+    X = -10000
+    Y = -20000
+    selection = filterRecords("(Energy<X and Energy>Y)",records)
+
+    And in general you can use any complex expression using boolean operators and parentheses.
+    """
+
+    ## Format the string
+    tags = ["not","and","or",">","<","==","+","-","(",")"]
+    expression = expression.lower()
+    assert not ">=" in expression and not "<=" in expression, "You cannot use '>=' or '<=' in your expressions."
+    
+    ## Identify metrics in expression
+    tags = re.findall(r"'(.*?)'", expression)
+    
+    # Substitute keys by the p keys
+    for tag in set(tags):
+        expression = expression.replace("'%s'"%tag, "r['%s']"%process_tag(tag))
+    print expression
+    
+    selection = []
+    for r in records:
+        if eval(expression):
+            selection.append(r)
+
+    return selection
 
 def copyChunck(origin, to, start,end):
-	file = open(origin,"r")
-	lines = file.readlines()
-	file.close()
-	print(origin,start,end)
+	to.writelines(open(origin,"r").readlines()[start:end+1])
 
-	for i in range(start,end+1):
-		to.write(lines[i])
-
+def regenerate_remarks(record, file_handler):
+    """
+    Creates new remarks with the keys. At this point it is not possible to get the original
+    remarks again (it would be with some more effort, but it is worthless).
+    """
+    for key in record:
+        if not key in ["body","filename"]:
+             file_handler.write("REMARK %s %s\n"%(key, record[key]))
 
 def genSingleTraj(name, records, selection):
-	file = open(name,"w")
+    """
+    Copies the contents of the models of interest (in selection) into another file.
+    """
+    out_handler = open(name,"w")
 
-	## Write seqres
-	seq_record = records[0]
-	for r in records:
-		if "seqres" in r.keys():
-			seq_record = r
-			break
+    for record in selection:
+        regenerate_remarks(record, out_handler)
+        copyChunck(record['file'], out_handler, record['body'][0],record['body'][1])
 
-	copyChunck(r['file'], file, r['body'][0],r['body'][1])
-
-	## Now write selection
-	for r in selection:
-		if not 'seqres' in r.keys():
-			copyChunck(r['file'], file, r['body'][0],r['body'][1])
-
-	file.close()
+    out_handler.close()
 
 def genMetricsFile(name, metrics, selection):
 	numpy.savetxt(name, genMetrics(metrics, selection))
@@ -211,8 +204,9 @@ def genMetrics(metrics, selection):
 		this_metrics = []
 		for m in metrics:
 			try:
-				this_metrics.append(r[m.lower()])
+				this_metrics.append(r[process_tag(m.lower())])
 			except KeyError:
 				this_metrics.append(0)
 		filtered_metrics.append(this_metrics)
 	return numpy.array(filtered_metrics)
+
