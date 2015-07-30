@@ -162,7 +162,7 @@ def filterRecords(expression, records):
     # Substitute keys by the p keys
     for tag in set(tags):
         expression = expression.replace("'%s'"%tag, "r['%s']"%process_tag(tag))
-    print expression
+    #print expression
     
     selection = []
     for r in records:
@@ -171,8 +171,6 @@ def filterRecords(expression, records):
 
     return selection
 
-def copyChunck(origin, to, start,end):
-	to.writelines(open(origin,"r").readlines()[start:end+1])
 
 def regenerate_remarks(record, file_handler):
     """
@@ -183,6 +181,16 @@ def regenerate_remarks(record, file_handler):
         if not key in ["body","filename"]:
              file_handler.write("REMARK %s %s\n"%(key, record[key]))
 
+def copyChunck(origin, to, start,end):
+	to.writelines(open(origin,"r").readlines()[start:end+1])
+
+def copyChunck2(origin, to, start,end):
+    from_file = open(origin)
+    for i, line in enumerate(from_file):
+        if i >=  start and i <= end:
+            to.write(line)
+    from_file.close()
+
 def genSingleTraj(name, records, selection):
     """
     Copies the contents of the models of interest (in selection) into another file.
@@ -191,7 +199,7 @@ def genSingleTraj(name, records, selection):
 
     for record in selection:
         regenerate_remarks(record, out_handler)
-        copyChunck(record['file'], out_handler, record['body'][0],record['body'][1])
+        copyChunck2(record['file'], out_handler, record['body'][0],record['body'][1])
 
     out_handler.close()
 
